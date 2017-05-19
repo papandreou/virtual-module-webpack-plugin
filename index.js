@@ -13,18 +13,7 @@ class VirtualModulePlugin {
     const moduleName = this.options.moduleName;
     const ctime = VirtualModulePlugin.statsDate();
     let modulePath = this.options.path;
-
-    let contents;
-    if (typeof this.options.contents === 'string') {
-      contents = this.options.contents;
-    }
-    if (typeof this.options.contents === 'object') {
-      contents = JSON.stringify(this.options.contents);
-    }
-    if (typeof this.options.contents === 'function') {
-      //call then function must be return string
-      contents = this.options.contents();
-    }
+    let contents = this.options.contents;
 
     function resolverPlugin(request, cb) {
       // populate the file system cache with the virtual module
@@ -45,12 +34,31 @@ class VirtualModulePlugin {
       }
     }
 
-    if (!compiler.resolvers.normal) {
-      compiler.plugin('after-resolvers', () => {
+    function injectContents() {
+      if (typeof contents === 'object') {
+        contents = JSON.stringify(contents);
+      }
+      if (!compiler.resolvers.normal) {
+        compiler.plugin('after-resolvers', () => {
+          compiler.resolvers.normal.plugin('resolve', resolverPlugin);
+        });
+      } else {
         compiler.resolvers.normal.plugin('resolve', resolverPlugin);
+      }
+    }
+
+    if (typeof contents === 'function') {
+      // call then function must be return string, object (will be JSON.stringify-ed) or promise
+      contents = contents();
+    }
+
+    if (contents && typeof contents.then === 'function') {
+      contents.then((value) => {
+        contents = value;
+        injectContents();
       });
     } else {
-      compiler.resolvers.normal.plugin('resolve', resolverPlugin);
+      injectContents();
     }
   }
 
