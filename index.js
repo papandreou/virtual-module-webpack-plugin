@@ -14,6 +14,11 @@ class VirtualModulePlugin {
     const ctime = VirtualModulePlugin.statsDate();
     let modulePath = this.options.path;
     let contents = this.options.contents;
+    if (typeof contents === 'function') {
+      contents = contents();
+    }
+
+    let injectionPromise;
 
     function resolverPlugin(request, cb) {
       // populate the file system cache with the virtual module
@@ -28,34 +33,22 @@ class VirtualModulePlugin {
       if (!modulePath) {
         modulePath = this.join(compiler.context, moduleName);
       }
-
       if (fs._readFileStorage.data[modulePath]) {
-        setImmediate(cb);
-      }
-
-      function injectContents() {
-        if (typeof contents === 'object') {
-          contents = JSON.stringify(contents);
+        // Not necessary now that we have _injectionPromise?
+        if (cb) {
+          setImmediate(cb);
         }
+        return;
       }
+      injectionPromise = injectionPromise || Promise.resolve(contents)
+      .then((resolvedContents) => {
+        if (typeof resolvedContents === 'object') {
+          resolvedContents = JSON.stringify(resolvedContents);
+        }
+        VirtualModulePlugin.populateFilesystem({ fs, resolvedContents, modulePath, ctime });
+      });
 
-      if (typeof contents === 'function') {
-        // call then function must be return string, object (will be JSON.stringify-ed) or promise
-        contents = contents();
-      }
-
-      if (contents && typeof contents.then === 'function') {
-        contents.then((value) => {
-          contents = value;
-          injectContents();
-        });
-      } else {
-        injectContents();
-      }
-
-      const stats = VirtualModulePlugin.createStats({ fs, modulePath, contents, ctime });
-      fs._statStorage.data[modulePath] = [null, stats];
-      fs._readFileStorage.data[modulePath] = [null, contents];
+      injectionPromise.then(() => cb(), cb);
     }
 
     if (!compiler.resolvers.normal) {
@@ -65,6 +58,16 @@ class VirtualModulePlugin {
     } else {
       compiler.resolvers.normal.plugin('resolve', resolverPlugin);
     }
+  }
+
+  static populateFilesystem(options) {
+    const fs = options.fs;
+    const contents = options.contents;
+    const modulePath = options.modulePath;
+    const ctime = options.time;
+    const stats = VirtualModulePlugin.createStats({ fs, modulePath, contents, ctime });
+    fs._statStorage.data[modulePath] = [null, stats];
+    fs._readFileStorage.data[modulePath] = [null, contents];
   }
 
   static statsDate(inputDate) {
