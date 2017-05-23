@@ -28,50 +28,43 @@ class VirtualModulePlugin {
       if (!modulePath) {
         modulePath = this.join(compiler.context, moduleName);
       }
-      VirtualModulePlugin.populateFilesystem({ fs, modulePath, contents, ctime });
-      if (cb) {
-        cb();
-      }
-    }
 
-    function injectContents() {
-      if (typeof contents === 'object') {
-        contents = JSON.stringify(contents);
+      if (fs._readFileStorage.data[modulePath]) {
+        setImmediate(cb);
       }
-      if (!compiler.resolvers.normal) {
-        compiler.plugin('after-resolvers', () => {
-          compiler.resolvers.normal.plugin('resolve', resolverPlugin);
+
+      function injectContents() {
+        if (typeof contents === 'object') {
+          contents = JSON.stringify(contents);
+        }
+      }
+
+      if (typeof contents === 'function') {
+        // call then function must be return string, object (will be JSON.stringify-ed) or promise
+        contents = contents();
+      }
+
+      if (contents && typeof contents.then === 'function') {
+        contents.then((value) => {
+          contents = value;
+          injectContents();
         });
       } else {
-        compiler.resolvers.normal.plugin('resolve', resolverPlugin);
-      }
-    }
-
-    if (typeof contents === 'function') {
-      // call then function must be return string, object (will be JSON.stringify-ed) or promise
-      contents = contents();
-    }
-
-    if (contents && typeof contents.then === 'function') {
-      contents.then((value) => {
-        contents = value;
         injectContents();
+      }
+
+      const stats = VirtualModulePlugin.createStats({ fs, modulePath, contents, ctime });
+      fs._statStorage.data[modulePath] = [null, stats];
+      fs._readFileStorage.data[modulePath] = [null, contents];
+    }
+
+    if (!compiler.resolvers.normal) {
+      compiler.plugin('after-resolvers', () => {
+        compiler.resolvers.normal.plugin('resolve', resolverPlugin);
       });
     } else {
-      injectContents();
+      compiler.resolvers.normal.plugin('resolve', resolverPlugin);
     }
-  }
-
-  static populateFilesystem(options) {
-    const fs = options.fs;
-    const modulePath = options.modulePath;
-    const contents = options.contents;
-    if (fs._readFileStorage.data[modulePath]) {
-      return;
-    }
-    const stats = VirtualModulePlugin.createStats(options);
-    fs._statStorage.data[modulePath] = [null, stats];
-    fs._readFileStorage.data[modulePath] = [null, contents];
   }
 
   static statsDate(inputDate) {
